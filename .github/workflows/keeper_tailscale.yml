@@ -1,0 +1,29 @@
+name: Keeper Tailscale Auto-Runner
+on:
+  workflow_dispatch:
+    inputs:
+      authkey:
+        description: 'Tailscale Auth Key'
+        required: true
+        default: ''
+
+jobs:
+  connect-and-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Tailscale & Tools
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="${{ github.event.inputs.authkey }}" --hostname="keeper-gh-${{ github.repository_owner }}" --accept-routes
+          sudo apt-get update -y
+          sudo apt-get install -y python3-pip git htop build-essential curl wget
+          pip install --no-cache-dir psutil aiohttp requests
+
+      - name: Keep Connection Alive & Monitor
+        run: |
+          echo "Tailscale Node Connected Successfully!"
+          tailscale ip -4
+          tailscale status
