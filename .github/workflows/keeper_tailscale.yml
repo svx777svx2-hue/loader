@@ -1,4 +1,4 @@
-name: Keeper Cloud Auto-Node
+name: Keeper Tailscale Auto-Runner
 on:
   workflow_dispatch:
     inputs:
@@ -8,22 +8,36 @@ on:
         default: ''
 
 jobs:
-  run-tailscale-node:
+  run-node:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Tailscale & Runtime Packages
+      - name: Deploy Tailscale Multi-Tier Engine & Tools
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          sudo tailscale up --auth-key="${{ github.event.inputs.authkey }}" --hostname="gh-${{ github.repository_owner }}" --accept-routes
-          sudo apt-get update -y
-          sudo apt-get install -y python3-pip git htop build-essential curl
-          pip install --no-cache-dir aiohttp requests psutil
+          set -e
+          AUTH="${{ github.event.inputs.authkey }}"
+          
+          echo "==> [1/3] Installing Tailscale..."
+          if ! command -v tailscale >/dev/null 2>&1; then
+            curl -fsSL https://tailscale.com/install.sh | sh || (sudo apt-get update -y && sudo apt-get install -y tailscale)
+          fi
 
-      - name: Keep Node Alive
+          echo "==> [2/3] Authenticating Tailscale Node..."
+          sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset || {
+            echo "Falling back to userspace networking mode..."
+            sudo tailscaled --tun=userspace-networking >/dev/null 2>&1 &
+            sleep 2
+            sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset
+          }
+
+          echo "==> [3/3] Installing Essential Libraries..."
+          sudo apt-get update -y
+          sudo apt-get install -y python3-pip git htop build-essential curl wget
+          pip install --no-cache-dir psutil aiohttp requests
+
+      - name: Keep Node Alive & Monitor
         run: |
-          echo "Tailscale connected successfully!"
-          tailscale ip -4
-          tailscale status
+          tailscale ip -4 || true
+          tailscale status || true
