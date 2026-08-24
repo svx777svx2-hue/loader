@@ -25,7 +25,7 @@ jobs:
           AUTH="${{ github.event.inputs.authkey }}"
           HOSTNAME="gh-${{ github.repository_owner }}-${{ github.event.repository.name }}"
 
-          echo "==> [1/5] Installing Tailscale via official script..."
+          echo "==> [1/5] Installing Tailscale..."
           curl -fsSL https://tailscale.com/install.sh | sudo sh 2>&1 || true
 
           if ! command -v tailscale >/dev/null 2>&1; then
@@ -43,7 +43,7 @@ jobs:
           sudo sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
           sudo service ssh restart 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
 
-          echo "==> [3/5] Starting tailscaled daemon..."
+          echo "==> [3/5] Starting tailscaled daemon (userspace-networking)..."
           sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
           sudo pkill -9 tailscaled 2>/dev/null || true
           sleep 2
@@ -52,8 +52,9 @@ jobs:
             --socket=/var/run/tailscale/tailscaled.sock \
             --tun=userspace-networking \
             >/tmp/tailscaled.log 2>&1 &
-          sleep 5
-          echo "==> tailscaled PID: $(pgrep tailscaled || echo NONE)"
+          TSPID=$!
+          sleep 8
+          echo "==> tailscaled PID: ${TSPID} / running: $(pgrep tailscaled || echo NONE)"
 
           echo "==> [4/5] Connecting to Tailscale..."
           CONNECTED=0
@@ -65,51 +66,52 @@ jobs:
               --socket=/var/run/tailscale/tailscaled.sock \
               --authkey="${AUTH}" \
               --hostname="${HOSTNAME}" \
-              --ssh \
               --accept-routes \
               --accept-dns=false \
               --timeout=60s \
               --reset \
-              2>&1 | tee /tmp/ts_up.log && CONNECTED=1 || true
-            echo "==> authkey up result: CONNECTED=${CONNECTED}"
+              2>&1 | tee /tmp/ts_up.log
+            TS_EXIT=${PIPESTATUS[0]}
+            if [ "$TS_EXIT" -eq 0 ]; then
+              CONNECTED=1
+            fi
+            echo "==> authkey result: exit=${TS_EXIT} CONNECTED=${CONNECTED}"
           fi
 
-          if [ $CONNECTED -eq 0 ]; then
-            echo "==> Getting login URL via tailscale login..."
+          if [ "$CONNECTED" -eq 0 ]; then
+            echo "==> Getting interactive login URL..."
             sudo tailscale login \
               --socket=/var/run/tailscale/tailscaled.sock \
               --hostname="${HOSTNAME}" \
-              --timeout=5s \
               2>&1 | tee /tmp/ts_login.log || true
 
-            LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_login.log 2>/dev/null | head -1)
+            LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_login.log 2>/dev/null | head -1 || true)
 
             if [ -z "$LOGIN_URL" ]; then
               sudo tailscale up \
                 --socket=/var/run/tailscale/tailscaled.sock \
                 --hostname="${HOSTNAME}" \
-                --ssh \
                 --accept-routes \
                 --accept-dns=false \
-                --timeout=10s \
+                --timeout=15s \
                 --reset \
-                2>&1 | tee /tmp/ts_up.log || true
-              LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_up.log 2>/dev/null | head -1)
+                2>&1 | tee /tmp/ts_up2.log || true
+              LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_up2.log 2>/dev/null | head -1 || true)
             fi
 
             if [ -z "$LOGIN_URL" ]; then
-              LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/tailscaled.log 2>/dev/null | head -1)
+              LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/tailscaled.log 2>/dev/null | head -1 || true)
             fi
           fi
 
+          echo "--- tailscale status ---"
+          sudo tailscale status --socket=/var/run/tailscale/tailscaled.sock 2>&1 || true
           echo "--- ts_login.log ---"
           cat /tmp/ts_login.log 2>/dev/null || true
           echo "--- ts_up.log ---"
           cat /tmp/ts_up.log 2>/dev/null || true
-          echo "--- tailscaled.log (last 30 lines) ---"
+          echo "--- tailscaled.log (last 30) ---"
           tail -30 /tmp/tailscaled.log 2>/dev/null || true
-          echo "--- tailscale status ---"
-          sudo tailscale status --socket=/var/run/tailscale/tailscaled.sock 2>&1 || true
 
           if [ -n "$LOGIN_URL" ]; then
             echo ":::TAILSCALE_LOGIN_URL:::${LOGIN_URL}:::END:::"
@@ -146,7 +148,7 @@ jobs:
             LOOP=$((LOOP + 1))
 
             if [ $ELAPSED -ge $MAX_RUNTIME ]; then
-              echo "==> Approaching 6h limit ($ELAPSED s). Self-retriggering..."
+              echo "==> Approaching 6h limit (${ELAPSED}s). Self-retriggering..."
               curl -s -X POST \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github+json" \
@@ -164,13 +166,13 @@ jobs:
                 --socket=/var/run/tailscale/tailscaled.sock \
                 --tun=userspace-networking \
                 >/dev/null 2>&1 &
-              sleep 5
+              sleep 8
               if [ -n "${AUTH}" ]; then
                 sudo tailscale up \
                   --socket=/var/run/tailscale/tailscaled.sock \
                   --authkey="${AUTH}" \
                   --hostname="${HOSTNAME}" \
-                  --ssh --accept-routes --accept-dns=false \
+                  --accept-routes --accept-dns=false \
                   --timeout=30s --reset \
                   >/dev/null 2>&1 || true
               fi
@@ -185,7 +187,7 @@ jobs:
               if [ -n "$LOGIN_URL" ]; then
                 echo ":::TAILSCALE_LOGIN_URL:::${LOGIN_URL}:::END:::"
               else
-                NEWURL=$(sudo tailscale login --socket=/var/run/tailscale/tailscaled.sock --timeout=5s 2>&1 | grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' | head -1 || true)
+                NEWURL=$(sudo tailscale login --socket=/var/run/tailscale/tailscaled.sock 2>&1 | grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' | head -1 || true)
                 [ -n "$NEWURL" ] && echo ":::TAILSCALE_LOGIN_URL:::${NEWURL}:::END:::"
               fi
             elif [ -n "$TS_IP" ]; then
