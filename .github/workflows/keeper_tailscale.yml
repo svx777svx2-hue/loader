@@ -23,17 +23,8 @@ jobs:
             curl -fsSL https://tailscale.com/install.sh | sh || (sudo apt-get update -y && sudo apt-get install -y tailscale)
           fi
 
-          echo "==> [2/4] Starting Tailscale Daemon with Universal TUN/Userspace Fallback..."
-          sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
-          
-          if ! sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset 2>/dev/null; then
-            echo "Direct kernel TUN unavailable. Switching to Userspace Networking Engine..."
-            sudo pkill tailscaled || true
-            sleep 1
-            sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
-            sleep 3
-            sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --accept-dns=false --reset
-          fi
+          echo "==> [2/4] Starting Tailscale Daemon in Userspace..."
+          sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale && sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 & sleep 3 && sudo tailscale up --authkey="tskey-auth-kEyWUbgUnp11CNTRL-NsduTrTYbYBN2Ny4J4rdYBQk8rgAV6qN" --hostname="gh-{{ github.repository_owner }}" --accept-routes --accept-dns=false --reset
 
           echo "==> [3/4] Installing Development Libraries (Python3, Pip, Git, C-Build, Htop)..."
           sudo apt-get update -y
@@ -46,5 +37,11 @@ jobs:
 
       - name: Keep Node Active & Online
         run: |
-          echo "Keeper Node is actively running in the background."
-          sleep 10
+          echo "Keeper Node is actively running in the background. Keeping active..."
+          for i in {1..720}; do
+            if ! pgrep tailscaled >/dev/null; then
+              echo "tailscaled daemon stopped."
+              exit 1
+            fi
+            sleep 30
+          done
