@@ -57,7 +57,6 @@ jobs:
         run: |
           echo "==> Starting Keeper 24/7 Self-Healing Keep-Alive Loop..."
           START_TIME=$(date +%s)
-          # Maximum runtime per run before dispatching a new workflow: 5.5 hours (19800 seconds)
           MAX_RUNTIME=19800
 
           while true; do
