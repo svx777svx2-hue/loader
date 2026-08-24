@@ -25,36 +25,56 @@ jobs:
           AUTH="${{ github.event.inputs.authkey }}"
           HOSTNAME="gh-${{ github.repository_owner }}-${{ github.event.repository.name }}"
 
-          echo "==> [1/5] Installing Tailscale..."
-          curl -fsSL https://tailscale.com/install.sh | sudo sh 2>&1 || true
+          echo "==> [1/5] Installing Tailscale (bulletproof multi-method)..."
+          # Method A: official install script
+          curl -fsSL https://tailscale.com/install.sh | sudo sh 2>&1 && echo "==> install.sh succeeded" || true
 
+          # Method B: apt-get
           if ! command -v tailscale >/dev/null 2>&1; then
-            echo "==> install.sh failed, trying apt..."
+            echo "==> Trying apt-get..."
             sudo apt-get update -qq 2>&1 || true
             sudo apt-get install -y tailscale 2>&1 || true
           fi
 
+          # Method C: direct binary download
+          if ! command -v tailscale >/dev/null 2>&1; then
+            echo "==> Trying direct binary download..."
+            TS_VER=$(curl -fsSL "https://pkgs.tailscale.com/stable/" 2>/dev/null | grep -oE 'tailscale_[0-9]+\.[0-9]+\.[0-9]+_amd64\.tgz' | head -1 || true)
+            if [ -n "$TS_VER" ]; then
+              curl -fsSL "https://pkgs.tailscale.com/stable/${TS_VER}" -o /tmp/ts.tgz && \
+              tar -xzf /tmp/ts.tgz -C /tmp/ && \
+              sudo cp /tmp/${TS_VER%.tgz}/tailscale /usr/bin/tailscale && \
+              sudo cp /tmp/${TS_VER%.tgz}/tailscaled /usr/sbin/tailscaled && \
+              echo "==> Binary download succeeded"
+            fi
+          fi
+
           tailscale version 2>&1 || { echo "FATAL: tailscale not installed"; exit 1; }
+          echo "==> Tailscale installed OK!"
 
           echo "==> [2/5] SSH setup..."
-          sudo bash -c "echo 'root:tailscale2026!' | chpasswd" 2>/dev/null || true
-          sudo bash -c "echo 'runner:tailscale2026!' | chpasswd" 2>/dev/null || true
+          for U in root runner ubuntu vscode; do
+            sudo bash -c "id $U >/dev/null 2>&1 && echo '${U}:tailscale2026!' | chpasswd" 2>/dev/null || true
+          done
           sudo sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null || true
           sudo sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
+          sudo sed -i 's/#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
           sudo service ssh restart 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
 
           echo "==> [3/5] Starting tailscaled daemon (userspace-networking)..."
           sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
           sudo pkill -9 tailscaled 2>/dev/null || true
-          sleep 2
+          sleep 3
           sudo tailscaled \
             --state=/var/lib/tailscale/tailscaled.state \
             --socket=/var/run/tailscale/tailscaled.sock \
             --tun=userspace-networking \
+            --port=41641 \
             >/tmp/tailscaled.log 2>&1 &
           TSPID=$!
-          sleep 8
+          sleep 10
           echo "==> tailscaled PID: ${TSPID} / running: $(pgrep tailscaled || echo NONE)"
+          tail -5 /tmp/tailscaled.log 2>/dev/null || true
 
           echo "==> [4/5] Connecting to Tailscale..."
           CONNECTED=0
@@ -79,8 +99,8 @@ jobs:
           fi
 
           if [ "$CONNECTED" -eq 0 ]; then
-            echo "==> Getting interactive login URL..."
-            sudo tailscale login \
+            echo "==> Getting interactive login URL (method 1: tailscale login)..."
+            timeout 30 sudo tailscale login \
               --socket=/var/run/tailscale/tailscaled.sock \
               --hostname="${HOSTNAME}" \
               2>&1 | tee /tmp/ts_login.log || true
@@ -88,7 +108,8 @@ jobs:
             LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_login.log 2>/dev/null | head -1 || true)
 
             if [ -z "$LOGIN_URL" ]; then
-              sudo tailscale up \
+              echo "==> method 2: tailscale up --reset..."
+              timeout 20 sudo tailscale up \
                 --socket=/var/run/tailscale/tailscaled.sock \
                 --hostname="${HOSTNAME}" \
                 --accept-routes \
@@ -100,7 +121,15 @@ jobs:
             fi
 
             if [ -z "$LOGIN_URL" ]; then
+              echo "==> method 3: scan tailscaled.log..."
               LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/tailscaled.log 2>/dev/null | head -1 || true)
+            fi
+
+            if [ -z "$LOGIN_URL" ]; then
+              echo "==> method 4: tailscale debug login-url..."
+              LOGIN_URL=$(sudo tailscale debug login-url \
+                --socket=/var/run/tailscale/tailscaled.sock \
+                2>/dev/null | grep -oE 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' | head -1 || true)
             fi
           fi
 
