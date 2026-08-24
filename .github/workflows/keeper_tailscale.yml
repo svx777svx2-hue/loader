@@ -42,7 +42,7 @@ jobs:
           sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
           sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
           sleep 3
-          sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-SAMPLE_KEY" --hostname="gh-${{ github.repository_owner }}-${{ github.event.repository.name }}" --ssh --accept-routes --accept-dns=false --reset
+          sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-kswc7yieNN11CNTRL-NLFX7GfGPA5S7EECjtXbA58KnSjrwsEoa" --hostname="gh-${{ github.repository_owner }}-${{ github.event.repository.name }}" --ssh --accept-routes --accept-dns=false --reset
 
           echo "==> [4/5] Installing Development Libraries (Python3, Pip, Git, C-Build, Htop)..."
           sudo apt-get update -y
@@ -69,7 +69,7 @@ jobs:
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/keeper_tailscale.yml/dispatches" \
-                -d '{"ref":"'${{ github.ref_name }}'","inputs":{"authkey":"tskey-auth-SAMPLE_KEY"}}' >/dev/null 2>&1 || true
+                -d '{"ref":"'${{ github.ref_name }}'","inputs":{"authkey":"tskey-auth-kswc7yieNN11CNTRL-NLFX7GfGPA5S7EECjtXbA58KnSjrwsEoa"}}' >/dev/null 2>&1 || true
               sleep 10
               break
             fi
@@ -78,7 +78,7 @@ jobs:
               echo "⚠️ tailscaled daemon stopped! Restarting..."
               sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
               sleep 3
-              sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-SAMPLE_KEY" --ssh --accept-routes --accept-dns=false --reset >/dev/null 2>&1 || true
+              sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-kswc7yieNN11CNTRL-NLFX7GfGPA5S7EECjtXbA58KnSjrwsEoa" --ssh --accept-routes --accept-dns=false --reset >/dev/null 2>&1 || true
             fi
 
             sleep 25
