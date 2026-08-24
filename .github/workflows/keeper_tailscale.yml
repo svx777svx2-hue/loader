@@ -1,4 +1,4 @@
-name: Keeper Tailscale Auto-Runner
+name: Keeper Tailscale Engine
 on:
   workflow_dispatch:
     inputs:
@@ -8,36 +8,43 @@ on:
         default: ''
 
 jobs:
-  run-node:
+  run-tailscale-node:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Deploy Tailscale Multi-Tier Engine & Tools
+      - name: Setup Multi-Strategy Tailscale Node & Dev Tools
         run: |
           set -e
           AUTH="${{ github.event.inputs.authkey }}"
-          
-          echo "==> [1/3] Installing Tailscale..."
+          echo "==> [1/4] Installing Tailscale Official Package..."
           if ! command -v tailscale >/dev/null 2>&1; then
             curl -fsSL https://tailscale.com/install.sh | sh || (sudo apt-get update -y && sudo apt-get install -y tailscale)
           fi
 
-          echo "==> [2/3] Authenticating Tailscale Node..."
-          sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset || {
-            echo "Falling back to userspace networking mode..."
-            sudo tailscaled --tun=userspace-networking >/dev/null 2>&1 &
-            sleep 2
-            sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset
-          }
+          echo "==> [2/4] Starting Tailscale Daemon with Universal TUN/Userspace Fallback..."
+          sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
+          
+          if ! sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --reset 2>/dev/null; then
+            echo "Direct kernel TUN unavailable. Switching to Userspace Networking Engine..."
+            sudo pkill tailscaled || true
+            sleep 1
+            sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
+            sleep 3
+            sudo tailscale up --authkey="${AUTH}" --hostname="gh-${{ github.repository_owner }}" --accept-routes --accept-dns=false --reset
+          fi
 
-          echo "==> [3/3] Installing Essential Libraries..."
+          echo "==> [3/4] Installing Development Libraries (Python3, Pip, Git, C-Build, Htop)..."
           sudo apt-get update -y
-          sudo apt-get install -y python3-pip git htop build-essential curl wget
-          pip install --no-cache-dir psutil aiohttp requests
+          sudo apt-get install -y python3-pip git htop build-essential curl wget net-tools
+          pip install --no-cache-dir aiohttp requests psutil
 
-      - name: Keep Node Alive & Monitor
-        run: |
+          echo "==> [4/4] Node Status & Diagnostics:"
           tailscale ip -4 || true
           tailscale status || true
+
+      - name: Keep Node Active & Online
+        run: |
+          echo "Keeper Node is actively running in the background."
+          sleep 10
