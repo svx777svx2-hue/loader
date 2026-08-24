@@ -10,6 +10,9 @@ on:
 jobs:
   run-tailscale-node:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -18,30 +21,66 @@ jobs:
         run: |
           set -e
           AUTH="${{ github.event.inputs.authkey }}"
-          echo "==> [1/4] Installing Tailscale Official Package..."
+          echo "==> [1/5] Installing Tailscale Official Package..."
           if ! command -v tailscale >/dev/null 2>&1; then
             curl -fsSL https://tailscale.com/install.sh | sh || (sudo apt-get update -y && sudo apt-get install -y tailscale)
           fi
 
-          echo "==> [2/4] Starting Tailscale Daemon in Userspace..."
-          sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale && sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 & sleep 3 && sudo tailscale up --authkey="tskey-auth-kEyWUbgUnp11CNTRL-NsduTrTYbYBN2Ny4J4rdYBQk8rgAV6qN" --hostname="gh-{{ github.repository_owner }}" --accept-routes --accept-dns=false --reset
+          echo "==> [2/5] Setting up system SSH & user/root passwords ('tailscale2026!')..."
+          sudo bash -c "echo 'root:tailscale2026!' | chpasswd" 2>/dev/null || true
+          sudo bash -c "echo 'runner:tailscale2026!' | chpasswd" 2>/dev/null || true
+          sudo bash -c "echo 'ubuntu:tailscale2026!' | chpasswd" 2>/dev/null || true
+          sudo bash -c "echo 'vscode:tailscale2026!' | chpasswd" 2>/dev/null || true
 
-          echo "==> [3/4] Installing Development Libraries (Python3, Pip, Git, C-Build, Htop)..."
+          if command -v sshd >/dev/null 2>&1 || [ -f /etc/ssh/sshd_config ]; then
+            sudo sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null || true
+            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
+            sudo service ssh restart 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
+          fi
+
+          echo "==> [3/5] Starting Tailscale Daemon in Userspace & Enabling Tailscale SSH..."
+          sudo mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
+          sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
+          sleep 3
+          sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-SAMPLE_KEY" --hostname="gh-${{ github.repository_owner }}-${{ github.event.repository.name }}" --ssh --accept-routes --accept-dns=false --reset
+
+          echo "==> [4/5] Installing Development Libraries (Python3, Pip, Git, C-Build, Htop)..."
           sudo apt-get update -y
           sudo apt-get install -y python3-pip git htop build-essential curl wget net-tools
-          pip install --no-cache-dir aiohttp requests psutil
+          pip install --no-cache-dir aiohttp requests psutil || true
 
-          echo "==> [4/4] Node Status & Diagnostics:"
+          echo "==> [5/5] Node Status & Diagnostics:"
           tailscale ip -4 || true
           tailscale status || true
 
-      - name: Keep Node Active & Online
+      - name: Keep Node Active & Perpetually Alive (24/7)
         run: |
-          echo "Keeper Node is actively running in the background. Keeping active..."
-          for i in {1..720}; do
-            if ! pgrep tailscaled >/dev/null; then
-              echo "tailscaled daemon stopped."
-              exit 1
+          echo "==> Starting Keeper 24/7 Self-Healing Keep-Alive Loop..."
+          START_TIME=$(date +%s)
+          # Maximum runtime per run before dispatching a new workflow: 5.5 hours (19800 seconds)
+          MAX_RUNTIME=19800
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "==> Approaching GitHub Actions limit ($ELAPSED sec). Self-retriggering continuous workflow run..."
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/keeper_tailscale.yml/dispatches" \
+                -d '{"ref":"'${{ github.ref_name }}'","inputs":{"authkey":"tskey-auth-SAMPLE_KEY"}}' >/dev/null 2>&1 || true
+              sleep 10
+              break
             fi
-            sleep 30
+
+            if ! pgrep tailscaled >/dev/null 2>&1; then
+              echo "⚠️ tailscaled daemon stopped! Restarting..."
+              sudo tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking >/dev/null 2>&1 &
+              sleep 3
+              sudo tailscale up --socket=/var/run/tailscale/tailscaled.sock --authkey="tskey-auth-SAMPLE_KEY" --ssh --accept-routes --accept-dns=false --reset >/dev/null 2>&1 || true
+            fi
+
+            sleep 25
           done
