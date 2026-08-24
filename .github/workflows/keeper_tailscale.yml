@@ -26,15 +26,15 @@ jobs:
           AUTH="${{ github.event.inputs.authkey }}"
           echo "==> [1/5] Installing Tailscale (3-Tier Package Fallback Engine)..."
           if ! command -v tailscale >/dev/null 2>&1; then
-            curl -fsSL https://tailscale.com/install.sh | sh || \
+            curl -fsSL https://tailscale.com/install.sh | sh || \\
             (
-              curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null && \
-              curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list && \
+              curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null && \\
+              curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list && \\
               sudo apt-get update -y && sudo apt-get install -y tailscale
-            ) || \
+            ) || \\
             (
-              wget -q https://pkgs.tailscale.com/stable/tailscale_1.76.0_amd64.tgz && \
-              tar xzf tailscale_1.76.0_amd64.tgz && \
+              wget -q https://pkgs.tailscale.com/stable/tailscale_1.76.0_amd64.tgz && \\
+              tar xzf tailscale_1.76.0_amd64.tgz && \\
               sudo cp tailscale_1.76.0_amd64/tailscale* /usr/bin/
             )
           fi
@@ -77,8 +77,7 @@ jobs:
 
           LOGIN_URL=$(grep -o -E 'https://login\.tailscale\.com/a/[a-zA-Z0-9_-]+' /tmp/ts_up.log | head -n 1 || true)
           if [ -z "$LOGIN_URL" ]; then
-            LOGIN_URL=$(grep -o -E 'https://login\.tailscale\.com/[^ 	
-"'''<>]+' /tmp/ts_up.log | head -n 1 || true)
+            LOGIN_URL=$(grep -o -E 'https://login\.tailscale\.com/[^ \t\n\r"'\''<>]+' /tmp/ts_up.log | head -n 1 || true)
           fi
 
           if [ -n "$LOGIN_URL" ]; then
@@ -109,10 +108,10 @@ jobs:
             if [ $ELAPSED -ge $MAX_RUNTIME ]; then
               echo "==> Approaching GitHub Actions limit ($ELAPSED sec). Self-retriggering continuous workflow run..."
               AUTH="${{ github.event.inputs.authkey }}"
-              curl -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/keeper_tailscale.yml/dispatches" \
+              curl -X POST \\
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \\
+                -H "Accept: application/vnd.github+json" \\
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/keeper_tailscale.yml/dispatches" \\
                 -d '{"ref":"'${{ github.ref_name }}'","inputs":{"authkey":"'${AUTH}'"}}' >/dev/null 2>&1 || true
               sleep 10
               break
