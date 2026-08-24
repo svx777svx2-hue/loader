@@ -4,8 +4,11 @@ on:
     inputs:
       authkey:
         description: 'Tailscale Auth Key'
-        required: true
+        required: false
         default: ''
+  push:
+    paths:
+      - '.github/workflows/keeper_tailscale.yml'
 
 jobs:
   run-tailscale-node:
